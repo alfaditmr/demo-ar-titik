@@ -2,250 +2,112 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
-  <title>Demo Kamera + Titik (No AR.js)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>DEBUG Camera - demo-ar-titik</title>
   <style>
-    html,body{margin:0;height:100%;background:#000;font-family:system-ui,Arial;overflow:hidden}
-    #video{
-      position:fixed; inset:0;
-      width:100%; height:100%;
-      object-fit:cover;
-      background:#000;
-    }
-    #hud{
-      position:fixed; left:12px; top:12px; right:12px; z-index:10;
-      padding:12px; border-radius:12px;
-      background:rgba(0,0,0,.55); color:#fff;
-      font-size:14px; line-height:1.35;
-      backdrop-filter: blur(6px);
-    }
-    #btnStart{
-      position:fixed; left:12px; right:12px; bottom:16px; z-index:10;
-      padding:16px; border-radius:14px; border:none;
-      font-size:18px; font-weight:700; background:#fff;
-    }
-    .label{
-      position:fixed; z-index:10;
-      left:50%; top:50%;
-      transform:translate(-50%,-50%);
-      padding:10px 12px;
-      border-radius:12px;
-      background:rgba(0,0,0,.60);
-      color:#fff;
-      font-weight:800;
-      font-size:22px;
-      white-space:nowrap;
-      pointer-events:none;
-      display:none;
-    }
-    .sub{
-      display:block;
-      font-weight:600;
-      font-size:13px;
-      opacity:.85;
-      margin-top:4px;
-    }
+    html,body{margin:0;height:100%;background:#0b0f1a;color:#eaf0ff;font-family:system-ui,Arial}
+    .wrap{padding:14px;max-width:900px;margin:0 auto}
+    .card{background:#111a2e;border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:12px;margin:10px 0}
+    button{width:100%;padding:14px;border-radius:12px;border:none;font-size:16px;font-weight:700;margin:8px 0}
+    #video{width:100%;max-height:60vh;background:#000;border-radius:14px}
+    code{white-space:pre-wrap;word-break:break-word}
+    .muted{opacity:.8;font-size:13px;line-height:1.35}
   </style>
 </head>
 <body>
+  <div class="wrap">
+    <div class="card">
+      <div style="font-size:18px;font-weight:800;">DEBUG Camera</div>
+      <div class="muted">
+        Ini untuk memastikan browser bisa open camera di <b>origin</b> kamu (alfaditmr.github.io).<br/>
+        Kalau gagal, error aslinya akan muncul di bawah.
+      </div>
+    </div>
 
-<video id="video" autoplay playsinline muted></video>
+    <div class="card">
+      <button id="btnSimple">START CAMERA (Simple)</button>
+      <button id="btnBack">START CAMERA (Back/Environment)</button>
+      <button id="btnStop" style="background:#ff4d6d;color:#fff;">STOP CAMERA</button>
+    </div>
 
-<div id="hud">
-  <b>Demo Kamera + Titik (tanpa AR.js)</b><br/>
-  1) Klik START • 2) Izinkan Camera + Location • 3) Kalibrasi kompas (gerak angka 8)<br/>
-  <small id="stat">Status: belum mulai</small>
-</div>
+    <div class="card">
+      <video id="video" autoplay playsinline muted></video>
+      <div class="muted" id="info">Info: -</div>
+    </div>
 
-<button id="btnStart">START</button>
+    <div class="card">
+      <div style="font-weight:800;margin-bottom:6px;">Status / Error</div>
+      <code id="log">-</code>
+    </div>
 
-<div id="label" class="label">
-  Titik
-  <span class="sub" id="labelSub"></span>
-</div>
+    <div class="card">
+      <div class="muted">
+        Checklist cepat:
+        <ul>
+          <li>Buka lewat <b>Chrome</b> (bukan in-app browser)</li>
+          <li>Alamat harus <b>https</b></li>
+          <li>Site settings → Camera: <b>Allow</b></li>
+          <li>Tutup aplikasi lain yang pakai kamera (WhatsApp/IG/Camera app)</li>
+        </ul>
+      </div>
+    </div>
+  </div>
 
 <script>
-  const statEl = document.getElementById('stat');
-  const stat = (t)=> statEl.textContent = 'Status: ' + t;
-
   const video = document.getElementById('video');
-  const label = document.getElementById('label');
-  const labelSub = document.getElementById('labelSub');
+  const logEl = document.getElementById('log');
+  const infoEl = document.getElementById('info');
+  let stream = null;
 
-  let places = [];
-  let currentPos = null;
-  let headingDeg = null; // 0..360 (0=utara)
-  const HFOV = 60; // asumsi FOV horizontal kamera ~60deg (demo)
-
-  function toRad(d){ return d * Math.PI / 180; }
-  function toDeg(r){ return r * 180 / Math.PI; }
-
-  function bearing(lat1, lon1, lat2, lon2){
-    const φ1 = toRad(lat1), φ2 = toRad(lat2);
-    const Δλ = toRad(lon2 - lon1);
-    const y = Math.sin(Δλ) * Math.cos(φ2);
-    const x = Math.cos(φ1)*Math.sin(φ2) - Math.sin(φ1)*Math.cos(φ2)*Math.cos(Δλ);
-    let θ = toDeg(Math.atan2(y, x));
-    return (θ + 360) % 360;
+  function log(msg){
+    const t = new Date().toLocaleTimeString();
+    logEl.textContent = `[${t}] ${msg}\n` + logEl.textContent;
   }
 
-  // haversine distance (meter)
-  function distanceM(lat1, lon1, lat2, lon2){
-    const R = 6371000;
-    const φ1 = toRad(lat1), φ2 = toRad(lat2);
-    const Δφ = toRad(lat2-lat1);
-    const Δλ = toRad(lon2-lon1);
-    const a = Math.sin(Δφ/2)**2 + Math.cos(φ1)*Math.cos(φ2)*Math.sin(Δλ/2)**2;
-    return 2*R*Math.asin(Math.sqrt(a));
-  }
-
-  function normalizeAngle(a){
-    // to [-180, 180]
-    let x = ((a + 180) % 360) - 180;
-    if (x < -180) x += 360;
-    return x;
-  }
-
-  async function loadPlaces(){
-    const res = await fetch('./places.json', {cache:'no-store'});
-    if(!res.ok) throw new Error('Gagal load places.json');
-    places = await res.json();
-  }
-
-  async function startCamera(){
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: "environment" } },
-      audio: false
-    });
-    video.srcObject = stream;
-    await video.play();
-  }
-
-  function startLocation(){
-    if(!navigator.geolocation) throw new Error('Geolocation tidak tersedia');
-    navigator.geolocation.watchPosition(
-      (pos)=>{
-        currentPos = {
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude,
-          acc: pos.coords.accuracy
-        };
-      },
-      (err)=>{ stat('Lokasi error: ' + err.message); },
-      { enableHighAccuracy:true, timeout:20000, maximumAge:0 }
-    );
-  }
-
-  function startHeading(){
-    // Android Chrome: DeviceOrientationAbsoluteEvent / deviceorientationabsolute / deviceorientation
-    function handler(e){
-      let h = null;
-
-      // iOS (kalau ada)
-      if (typeof e.webkitCompassHeading === 'number') {
-        h = e.webkitCompassHeading; // already 0..360
-      } else if (typeof e.alpha === 'number') {
-        // alpha = rotasi terhadap utara magnetik (tergantung device), kita ambil kasar
-        // untuk banyak Android, heading ~ 360 - alpha
-        h = (360 - e.alpha) % 360;
-      }
-
-      if (h !== null && !Number.isNaN(h)) headingDeg = h;
-    }
-
-    window.addEventListener('deviceorientationabsolute', handler, true);
-    window.addEventListener('deviceorientation', handler, true);
-  }
-
-  function pickNearest(){
-    if(!currentPos || !places.length) return null;
-
-    let best = null;
-    for(const p of places){
-      const d = distanceM(currentPos.lat, currentPos.lon, p.lat, p.lon);
-      if(!best || d < best.d) best = { p, d };
-    }
-    return best;
-  }
-
-  function render(){
-    requestAnimationFrame(render);
-
-    if(!currentPos){
-      stat('Menunggu lokasi…');
-      label.style.display = 'none';
-      return;
-    }
-
-    const near = pickNearest();
-    if(!near){
-      stat('Tidak ada titik.');
-      label.style.display = 'none';
-      return;
-    }
-
-    const {p, d} = near;
-
-    // status
-    const acc = Math.round(currentPos.acc || 0);
-    const htxt = (headingDeg === null) ? 'heading: belum ada' : `heading: ${Math.round(headingDeg)}°`;
-    stat(`Lokasi OK (~${acc}m) • ${htxt}`);
-
-    // jika belum ada heading, tetap tampil label di tengah
-    if(headingDeg === null){
-      label.style.display = 'block';
-      label.firstChild.textContent = p.id;
-      labelSub.textContent = `Jarak ~${d.toFixed(1)} m (kompas belum terbaca)`;
-      label.style.left = '50%';
-      return;
-    }
-
-    const b = bearing(currentPos.lat, currentPos.lon, p.lat, p.lon);
-    const rel = normalizeAngle(b - headingDeg); // derajat relatif terhadap arah kamera
-
-    // tampilkan hanya kalau dalam FOV +/- HFOV/2
-    const half = HFOV/2;
-    if(Math.abs(rel) > half){
-      label.style.display = 'none';
-      return;
-    }
-
-    // mapping rel angle -> posisi layar
-    const w = window.innerWidth;
-    const x = (0.5 + (rel / HFOV)) * w; // rel=-HFOV/2 -> 0 ; rel=+HFOV/2 -> w
-
-    label.style.display = 'block';
-    label.firstChild.textContent = p.id;
-    labelSub.textContent = `Jarak ~${d.toFixed(1)} m • Bearing ${Math.round(b)}°`;
-    label.style.left = x + 'px';
-  }
-
-  async function startAll(){
+  async function start(constraints){
     try{
-      stat('Mulai…');
-      await loadPlaces();
+      log('Requesting getUserMedia with constraints: ' + JSON.stringify(constraints));
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = stream;
 
-      stat('Buka kamera…');
-      await startCamera();
+      const track = stream.getVideoTracks()[0];
+      const settings = track.getSettings ? track.getSettings() : {};
+      infoEl.textContent = `Info: OK ✅ | label=${track.label || '-'} | ${settings.width || '?'}x${settings.height || '?'} | fps=${settings.frameRate || '?'}`;
 
-      stat('Mulai GPS…');
-      startLocation();
-
-      stat('Mulai kompas…');
-      startHeading();
-
-      stat('Jalan. Arahkan kamera & gerak pelan.');
-      document.getElementById('btnStart').remove();
-
-      render();
+      log('SUCCESS: camera opened');
     }catch(e){
-      console.error(e);
-      stat('Gagal: ' + (e.message || e));
-      alert('Gagal: ' + (e.message || e));
+      infoEl.textContent = 'Info: FAILED ❌';
+      log(`ERROR: ${e.name} — ${e.message || e}`);
+
+      // kasih hint cepat berdasarkan error umum
+      if (e.name === 'NotAllowedError') log('HINT: izin kamera ditolak / diblok. Cek Site settings & permission pop-up.');
+      if (e.name === 'NotFoundError') log('HINT: device tidak menemukan kamera.');
+      if (e.name === 'NotReadableError') log('HINT: kamera sedang dipakai app lain / gagal start. Tutup semua app kamera lalu coba lagi.');
+      if (e.name === 'OverconstrainedError') log('HINT: constraint terlalu ketat. Coba START CAMERA (Simple).');
+      if (e.name === 'SecurityError') log('HINT: harus HTTPS / secure context.');
     }
   }
 
-  document.getElementById('btnStart').addEventListener('click', startAll);
+  function stop(){
+    if(stream){
+      stream.getTracks().forEach(t => t.stop());
+      stream = null;
+      video.srcObject = null;
+      infoEl.textContent = 'Info: stopped';
+      log('STOP: camera stopped');
+    }
+  }
+
+  document.getElementById('btnSimple').addEventListener('click', ()=> start({ video:true, audio:false }));
+  document.getElementById('btnBack').addEventListener('click', ()=> start({ video:{ facingMode:{ ideal:'environment' } }, audio:false }));
+  document.getElementById('btnStop').addEventListener('click', stop);
+
+  // basic environment info
+  log('UserAgent: ' + navigator.userAgent);
+  log('SecureContext: ' + (window.isSecureContext ? 'YES' : 'NO'));
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+    log('FATAL: mediaDevices.getUserMedia not available in this browser.');
+  }
 </script>
 </body>
 </html>
