@@ -5,108 +5,147 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
   <title>Demo AR Titik (Dummy)</title>
 
+  <!-- AFRAME -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+
+  <!-- ARJS -->
   <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
+
+  <!-- look-at -->
   <script src="https://cdn.jsdelivr.net/npm/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
 
   <style>
-    body{ margin:0; overflow:hidden; font-family:system-ui,Arial; }
-    #hud{
-      position:fixed; left:12px; top:12px; right:12px; z-index:9999;
-      padding:10px 12px; border-radius:12px;
-      background:rgba(0,0,0,.55); color:#fff;
-      font-size:14px; line-height:1.35;
-      backdrop-filter: blur(6px);
+    body{
+      margin:0;
+      overflow:hidden;
+      font-family:system-ui,Arial;
+      background:#111;
     }
-    #hud small{ opacity:.8; }
+
+    #hud{
+      position:fixed;
+      left:12px;
+      top:12px;
+      right:12px;
+      z-index:9999;
+      padding:12px;
+      border-radius:12px;
+      background:rgba(0,0,0,.6);
+      color:#fff;
+      font-size:14px;
+      line-height:1.4;
+    }
+
     #btnStart{
-      position:fixed; left:12px; right:12px; bottom:12px; z-index:9999;
-      padding:14px; border-radius:12px; border:none;
-      font-size:16px; font-weight:700;
+      position:fixed;
+      left:12px;
+      right:12px;
+      bottom:16px;
+      z-index:9999;
+      padding:16px;
+      border-radius:14px;
+      border:none;
+      font-size:18px;
+      font-weight:700;
+      background:#ffffff;
     }
   </style>
 </head>
 
 <body>
+
   <div id="hud">
     <b>Demo AR Titik (Dummy)</b><br/>
-    1) Aktifkan GPS • 2) Klik START • 3) Izinkan Location + Camera<br/>
+    1) Aktifkan GPS<br/>
+    2) Klik START<br/>
+    3) Izinkan Location & Camera<br/>
     <small id="stat">Status: belum mulai</small>
   </div>
 
   <button id="btnStart">START AR</button>
   <div id="arRoot"></div>
 
-  <script>
-    const stat = (t)=> document.getElementById('stat').textContent = 'Status: ' + t;
+<script>
+const stat = (t)=> document.getElementById('stat').textContent = "Status: " + t;
 
-    function makeLabel(text){
-      const el = document.createElement('a-entity');
-      el.setAttribute('look-at', '[gps-new-camera]');
-      el.setAttribute('position', '0 2 0');
+function makeLabel(text){
+  const el = document.createElement("a-entity");
+  el.setAttribute("look-at", "[gps-new-camera]");
+  el.setAttribute("position", "0 2 0");
 
-      const panel = document.createElement('a-plane');
-      panel.setAttribute('width', '1.6');
-      panel.setAttribute('height', '0.55');
-      panel.setAttribute('material', 'opacity: 0.75; color: #000');
-      el.appendChild(panel);
+  const panel = document.createElement("a-plane");
+  panel.setAttribute("width", "1.6");
+  panel.setAttribute("height", "0.55");
+  panel.setAttribute("material", "opacity: 0.75; color: #000");
+  el.appendChild(panel);
 
-      const t = document.createElement('a-text');
-      t.setAttribute('value', text);
-      t.setAttribute('align', 'center');
-      t.setAttribute('color', '#fff');
-      t.setAttribute('width', '3.2');
-      t.setAttribute('position', '0 0 0.01');
-      el.appendChild(t);
+  const t = document.createElement("a-text");
+  t.setAttribute("value", text);
+  t.setAttribute("align", "center");
+  t.setAttribute("color", "#fff");
+  t.setAttribute("width", "3.2");
+  t.setAttribute("position", "0 0 0.01");
+  el.appendChild(t);
 
-      return el;
-    }
+  return el;
+}
 
-    async function startAR(){
-      try{
-        stat('minta izin kamera…');
-        await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
+async function startAR(){
+  try{
+    stat("minta izin kamera...");
+    await navigator.mediaDevices.getUserMedia({ video:true });
 
-        stat('minta izin lokasi…');
-        await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, {
-          enableHighAccuracy:true, timeout:15000, maximumAge:0
-        }));
+    stat("minta izin lokasi...");
+    await new Promise((res,rej)=>{
+      navigator.geolocation.getCurrentPosition(res,rej,{
+        enableHighAccuracy:true,
+        timeout:15000,
+        maximumAge:0
+      });
+    });
 
-        // Build scene after permissions granted
-        document.getElementById('btnStart').remove();
-        document.getElementById('arRoot').innerHTML = `
-          <a-scene
-            vr-mode-ui="enabled:false"
-            embedded
-            arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
-            renderer="antialias:true; alpha:true;"
-          >
-            <a-entity gps-new-camera="gpsMinDistance: 2" camera></a-entity>
-            <a-entity id="poi-root"></a-entity>
-          </a-scene>
-        `;
+    document.getElementById("btnStart").remove();
 
-        stat('loading places.json…');
-        const res = await fetch('./places.json', { cache:'no-store' });
-        if(!res.ok) throw new Error('Gagal load places.json');
-        const places = await res.json();
+    document.getElementById("arRoot").innerHTML = `
+      <a-scene
+        vr-mode-ui="enabled:false"
+        embedded
+        arjs="sourceType: webcam; debugUIEnabled: false;"
+        renderer="antialias:true; alpha:true;"
+      >
+        <a-entity gps-new-camera="gpsMinDistance: 2" camera></a-entity>
+        <a-entity id="poi-root"></a-entity>
+      </a-scene>
+    `;
 
-        const root = document.getElementById('poi-root');
-        places.forEach(p=>{
-          const ent = makeLabel(p.id);
-          ent.setAttribute('gps-new-entity-place', `latitude:${p.lat}; longitude:${p.lon};`);
-          root.appendChild(ent);
-        });
+    stat("loading places.json...");
 
-        stat(`OK. loaded ${places.length} titik. Arahkan kamera & jalan pelan.`);
-      }catch(e){
-        console.error(e);
-        stat('gagal: ' + (e.message || e));
-        alert('Gagal start AR: ' + (e.message || e));
-      }
-    }
+    const res = await fetch("./places.json",{cache:"no-store"});
+    if(!res.ok) throw new Error("Gagal load places.json");
 
-    document.getElementById('btnStart').addEventListener('click', startAR);
-  </script>
+    const places = await res.json();
+    const root = document.getElementById("poi-root");
+
+    places.forEach(p=>{
+      const ent = makeLabel(p.id);
+      ent.setAttribute("gps-new-entity-place",
+        `latitude:${p.lat}; longitude:${p.lon};`
+      );
+      root.appendChild(ent);
+    });
+
+    stat("AR aktif. Arahkan kamera & jalan pelan.");
+
+  }catch(e){
+    console.error(e);
+    stat("Gagal: " + e.message);
+    alert("Gagal start AR: " + e.message);
+  }
+}
+
+document.getElementById("btnStart")
+  .addEventListener("click", startAR);
+</script>
+
 </body>
 </html>
