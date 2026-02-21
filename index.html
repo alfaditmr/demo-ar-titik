@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Demo Kamera + Titik (Accurate JS)</title>
+  <title>Demo Kamera + Titik (Stable JS)</title>
   <style>
     html,body{margin:0;height:100%;background:#000;font-family:system-ui,Arial;overflow:hidden}
     #video{position:fixed;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
@@ -14,8 +14,9 @@
     }
     #btnStart{
       position:fixed;left:12px;right:12px;bottom:16px;z-index:10;
-      padding:16px;border-radius:14px;border:none;font-size:18px;font-weight:800;background:#fff;
+      padding:16px;border-radius:14px;border:none;font-size:18px;font-weight:900;background:#fff;
     }
+    #btnStart[disabled]{opacity:.6}
     .label{
       position:fixed;z-index:10;top:48%;
       transform:translate(-50%,-50%);
@@ -31,7 +32,7 @@
 <video id="video" autoplay playsinline muted></video>
 
 <div id="hud">
-  <b>Demo Kamera + Titik (Accurate JS)</b><br/>
+  <b>Demo Kamera + Titik (Stable JS)</b><br/>
   Klik START → izinkan Camera + Location. Kompas: gerak angka 8 kalau heading ngaco.<br/>
   <small id="stat">Status: belum mulai</small>
 </div>
@@ -57,18 +58,24 @@
   let places = [];
   let pos = null;            // {lat, lon, acc, ts}
   let heading = null;        // 0..360
-  let headingSmooth = null;  // smoothed heading
-  let bearingSmooth = null;
+  let headingSmooth = null;
 
-  // === TUNING (silakan ubah) ===
-  const HFOV = 60;           // field of view (derajat) untuk mapping kiri/kanan
-  const MAX_ACC = 15;        // hanya pakai GPS kalau akurasi <= 15m
-  const HEADING_ALPHA = 0.25;// smoothing heading (0..1)
-  const POS_MIN_INTERVAL_MS = 700; // minimal interval update UI
-  // ============================
+  // === TUNING ===
+  const HFOV = 60;
+  const MAX_ACC = 20;         // naikin dulu biar lebih cepat terlihat (nanti bisa turunkan)
+  const HEADING_ALPHA = 0.25;
+  const UI_INTERVAL_MS = 400;
+  // ==============
 
   function toRad(d){ return d*Math.PI/180; }
   function toDeg(r){ return r*180/Math.PI; }
+  function norm180(a){ let x=((a+180)%360)-180; if(x<-180)x+=360; return x; }
+
+  function smoothAngle(prev, next, alpha){
+    if(prev==null) return next;
+    const diff = norm180(next - prev);
+    return (prev + diff*alpha + 360) % 360;
+  }
 
   function distanceM(lat1, lon1, lat2, lon2){
     const R=6371000;
@@ -87,37 +94,47 @@
     return (θ+360)%360;
   }
 
-  function norm180(a){
-    let x=((a+180)%360)-180;
-    if(x<-180) x+=360;
-    return x;
-  }
-
-  function smoothAngle(prev, next, alpha){
-    if(prev==null) return next;
-    // handle wrap around
-    const diff = norm180(next - prev);
-    return (prev + diff*alpha + 360) % 360;
-  }
-
   async function loadPlaces(){
     const res = await fetch('./places.json', {cache:'no-store'});
     if(!res.ok) throw new Error('Gagal load places.json');
     places = await res.json();
   }
 
-  async function startCamera(){
+  function stopStream(){
+    if(stream){
+      stream.getTracks().forEach(t=>t.stop());
+      stream = null;
+    }
+    video.srcObject = null;
+  }
+
+  async function startCameraStable(){
+    // stop kalau ada stream lama
+    stopStream();
+
+    // request stream
     stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: { ideal: "environment" } },
       audio: false
     });
+
+    // set sekali
     video.srcObject = stream;
-    await video.play();
+
+    // tunggu metadata siap sebelum play
+    await new Promise((resolve) => {
+      if (video.readyState >= 1) return resolve();
+      video.onloadedmetadata = () => resolve();
+    });
+
+    // play: jangan bikin error kalau dibatalkan
+    const p = video.play();
+    if (p && typeof p.then === 'function') {
+      await p.catch(() => {}); // swallow play-interrupted errors
+    }
   }
 
   function startGPS(){
-    if(!navigator.geolocation) throw new Error('Geolocation tidak tersedia');
-
     navigator.geolocation.watchPosition(
       (p)=>{
         const acc = p.coords.accuracy ?? 9999;
@@ -129,25 +146,19 @@
   }
 
   async function requestOrientationPermissionIfNeeded(){
-    // iOS style permission (some browsers use it)
     const DOE = window.DeviceOrientationEvent;
     if(DOE && typeof DOE.requestPermission === 'function'){
       const res = await DOE.requestPermission();
-      if(res !== 'granted') throw new Error('Izin sensor (DeviceOrientation) ditolak');
+      if(res !== 'granted') throw new Error('Izin sensor ditolak');
     }
   }
 
   function startHeading(){
     function handler(e){
       let h = null;
+      if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading;
+      else if (typeof e.alpha === 'number') h = (360 - e.alpha) % 360;
 
-      // iOS
-      if (typeof e.webkitCompassHeading === 'number') {
-        h = e.webkitCompassHeading;
-      } else if (typeof e.alpha === 'number') {
-        // many Android: alpha relates to compass heading (approx)
-        h = (360 - e.alpha) % 360;
-      }
       if(h!=null && !Number.isNaN(h)){
         heading = h;
         headingSmooth = smoothAngle(headingSmooth, heading, HEADING_ALPHA);
@@ -157,11 +168,9 @@
     window.addEventListener('deviceorientation', handler, true);
   }
 
-  function pickBestPoint(){
+  function pickNearest(){
     if(!pos || !places.length) return null;
-
-    // filter: only consider if GPS accuracy OK
-    if(pos.acc > MAX_ACC) return { weak:true, reason:`Akurasi GPS ${Math.round(pos.acc)}m (butuh <= ${MAX_ACC}m)` };
+    if(pos.acc > MAX_ACC) return { weak:true, reason:`Akurasi GPS ${Math.round(pos.acc)}m (target <= ${MAX_ACC}m)` };
 
     let best=null;
     for(const p of places){
@@ -171,22 +180,19 @@
     return best;
   }
 
-  let lastUI = 0;
+  let lastUI=0;
   function loop(){
     requestAnimationFrame(loop);
+    const now=Date.now();
+    if(now-lastUI < UI_INTERVAL_MS) return;
+    lastUI=now;
 
     if(!pos){
       stat('Menunggu GPS…');
       label.style.display='none';
       return;
     }
-
-    // throttle UI updates a bit
-    const now = Date.now();
-    if(now - lastUI < POS_MIN_INTERVAL_MS) return;
-    lastUI = now;
-
-    const best = pickBestPoint();
+    const best = pickNearest();
     if(!best){
       stat('Tidak ada titik.');
       label.style.display='none';
@@ -200,7 +206,6 @@
 
     const {p,d} = best;
 
-    // If heading not available, show centered label
     if(headingSmooth==null){
       stat(`GPS OK (~${Math.round(pos.acc)}m) • kompas belum terbaca`);
       label.style.display='block';
@@ -211,35 +216,35 @@
     }
 
     const b = bearingDeg(pos.lat,pos.lon,p.lat,p.lon);
-    bearingSmooth = smoothAngle(bearingSmooth, b, 0.35);
-
-    const rel = norm180(bearingSmooth - headingSmooth); // relative angle to camera direction
+    const rel = norm180(b - headingSmooth);
 
     stat(`GPS ~${Math.round(pos.acc)}m • heading ${Math.round(headingSmooth)}° • rel ${Math.round(rel)}°`);
 
     const half = HFOV/2;
     if(Math.abs(rel) > half){
-      // not in view, hide
       label.style.display='none';
       return;
     }
 
-    // Map rel angle to x position
     const x = (0.5 + (rel / HFOV)) * window.innerWidth;
-
     label.style.display='block';
     labelTitle.textContent = p.id;
     labelSub.textContent = `Jarak ~${d.toFixed(1)}m • Bearing ${Math.round(b)}°`;
     label.style.left = x + 'px';
   }
 
+  let started=false;
   async function startAll(){
+    if(started) return;
+    started=true;
+    btnStart.disabled=true;
+
     try{
       stat('Load titik…');
       await loadPlaces();
 
       stat('Buka kamera…');
-      await startCamera();
+      await startCameraStable();
 
       stat('Minta izin sensor…');
       await requestOrientationPermissionIfNeeded();
@@ -255,12 +260,17 @@
       loop();
     }catch(e){
       console.error(e);
+      started=false;
+      btnStart.disabled=false;
       stat('Gagal: ' + (e.message || e));
       alert('Gagal: ' + (e.message || e));
     }
   }
 
   btnStart.addEventListener('click', startAll);
+
+  // safety: stop camera when leaving page
+  window.addEventListener('pagehide', stopStream);
 </script>
 
 </body>
