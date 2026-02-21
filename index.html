@@ -1,0 +1,104 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1" />
+  <title>Demo AR Titik (Dummy)</title>
+
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/AR-js-org/AR.js/aframe/build/aframe-ar.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/aframe-look-at-component@0.8.0/dist/aframe-look-at-component.min.js"></script>
+
+  <style>
+    body{ margin:0; overflow:hidden; font-family:system-ui,Arial; }
+    #hud{
+      position:fixed; left:12px; top:12px; right:12px; z-index:9999;
+      padding:10px 12px; border-radius:12px;
+      background:rgba(0,0,0,.55); color:#fff;
+      font-size:14px; line-height:1.35;
+      backdrop-filter: blur(6px);
+    }
+    #hud small{ opacity:.8; }
+    #btn{
+      position:fixed; left:12px; bottom:12px; right:12px; z-index:9999;
+      padding:12px; border-radius:12px; border:none;
+      font-size:16px; font-weight:600;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="hud">
+    <b>Demo AR Titik (Dummy)</b><br/>
+    1) Aktifkan GPS • 2) Izinkan Location + Camera • 3) Tunggu 5–15 detik<br/>
+    <small>Catatan: Untuk titik rapat (3m), demo GPS bisa geser.</small><br/>
+    <small id="stat">Status: belum mulai</small>
+  </div>
+  <button id="btn" onclick="refreshPoints()">Reload titik</button>
+
+  <a-scene
+    vr-mode-ui="enabled:false"
+    embedded
+    arjs="sourceType: webcam; videoTexture: true; debugUIEnabled: false;"
+    renderer="antialias:true; alpha:true;"
+  >
+    <a-entity gps-new-camera="gpsMinDistance: 2" camera></a-entity>
+    <a-entity id="poi-root"></a-entity>
+  </a-scene>
+
+  <script>
+    const stat = (t)=> document.getElementById('stat').textContent = 'Status: ' + t;
+
+    function makeLabel(text){
+      const el = document.createElement('a-entity');
+      el.setAttribute('look-at', '[gps-new-camera]');
+      el.setAttribute('position', '0 2 0'); // naik 2m biar keliatan
+
+      const panel = document.createElement('a-plane');
+      panel.setAttribute('width', '1.6');
+      panel.setAttribute('height', '0.55');
+      panel.setAttribute('material', 'opacity: 0.75; color: #000');
+      panel.setAttribute('position', '0 0 0');
+      el.appendChild(panel);
+
+      const t = document.createElement('a-text');
+      t.setAttribute('value', text);
+      t.setAttribute('align', 'center');
+      t.setAttribute('color', '#fff');
+      t.setAttribute('width', '3.2');
+      t.setAttribute('position', '0 0 0.01');
+      el.appendChild(t);
+
+      return el;
+    }
+
+    async function loadPlaces(){
+      const res = await fetch('./places.json', { cache:'no-store' });
+      if(!res.ok) throw new Error('Gagal load places.json');
+      return res.json();
+    }
+
+    async function refreshPoints(){
+      stat('loading places.json…');
+      const root = document.getElementById('poi-root');
+      root.innerHTML = '';
+
+      const places = await loadPlaces();
+      places.forEach(p=>{
+        const ent = makeLabel(p.id);
+        ent.setAttribute('gps-new-entity-place', `latitude: ${p.lat}; longitude: ${p.lon};`);
+        root.appendChild(ent);
+      });
+
+      stat(`loaded ${places.length} titik. Arahkan kamera & jalan pelan.`);
+    }
+
+    // auto start
+    refreshPoints().catch(err=>{
+      console.error(err);
+      alert('Error: ' + err.message);
+      stat('error');
+    });
+  </script>
+</body>
+</html>
